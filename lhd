@@ -1,0 +1,102 @@
+#
+# lhd : generation des dependances en .h .hpp
+
+usage() {
+echo "
+ Exemple: $moi [-D_mma_] [-D bof] [-I /usr/include/local] [glob.c glub.cpp ...]
+"
+	exit
+}
+
+# options
+	moi=$(basename $0)
+	while getopts "hD:I:" c
+	do
+		case $c in
+		D)	Opt=$Opt" -D $OPTARG";;
+		I)	Opt=$Opt" -I $OPTARG";;
+		*)	usage;;
+		esac
+	done
+
+# acces au pre-processeur
+	CC="clang -E"
+	CP="clang++ -E"
+#	CC="gcc -E"
+#	CP="g++ -E"
+
+# fichiers source
+	cmd=non
+	shift $(($OPTIND - 1))
+	while [ $# -gt 0 ]
+	do
+		cmd=oui
+		case $1 in
+		*.cpp)	FicP=$FicP" $1";;
+		*.c)	FicC=$FicC" $1";;
+		*)	usage;;
+		esac
+		shift
+	done
+
+	if [ $cmd = non ]
+	then
+		FicC=${FicC:=*.c}
+		FicP=${FicP:=*.cpp}
+	fi
+
+### echo FicC : $FicC		
+### echo FicP : $FicP		
+
+# listes vides
+	if [ "$CP" = "" ]
+	then
+		if [ "$FicC" = "" ] || [ $(ls $FicC 2>/dev/null | wc -w) -eq 0 ]
+		then exit
+		fi
+
+	elif [ $(ls $FicC $FicP 2>/dev/null | wc -w) -eq 0 ]
+	then exit
+	fi
+
+# analyse des dependances
+	(
+		if [ $(ls $FicC | wc -w) -ne 0 ]
+		then	$CC $Opt $FicC
+		fi
+
+		if [ $(ls $FicP | wc -w) -ne 0 ] && [ "$CP" != "" ]
+		then	$CP $Opt $FicP
+		fi
+	) 2>/dev/null |
+
+	egrep '^# 1 "' |
+
+	sed -e 's/"//g' \
+	    -e 's/\.cpp/.o/' -e 's/\.c/.o/' -e 's/\.l/.o/' -e 's/\.y/.o/' |
+
+	awk '
+		# nouveau fichier source
+		NF == '3' { cible = " " $3 }
+
+		# dependances locales
+		NF == '4' {
+			if($4 != 1) next
+			if(dep[$3] !~ cible) dep[$3] = dep[$3] cible
+		}
+
+		END { for(i in dep) printf "%s;%s\n", i, dep[i] } ' |
+
+# Tri et mise en forme
+	grep -v "<built-in>" |
+	sort |
+	awk '	BEGIN { FS=";" }
+		{
+			printf "\n#--------------------\n\n"
+			sub(" ", "", $2)
+			printf "%s : %s\n", $2, $1
+		}
+		END { printf "\n#--------------------\n\n" }'
+
+# Sortie sur stdout
+
